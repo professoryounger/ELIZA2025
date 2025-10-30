@@ -74,44 +74,74 @@
             border-radius: 2px;
         }
     </style>
+    <!-- Firebase Imports for Sandbox Environment -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // IMPORTANT: The global variables (db, auth, userId, appId) are now assigned directly to the window object.
-        // This is done to ensure the global functions like sendMessage have access to them immediately.
+        // Global flags and variables
+        window.isFirestoreEnabled = false;
+        window.db = null;
+        window.auth = null;
+        window.userId = null;
         
         window.firebaseInit = async () => {
+            const loadingStatusElement = document.getElementById('initial-loading-status');
             try {
-                // IMPORTANT: The variables __app_id, __firebase_config, and __initial_auth_token
-                // are provided by the canvas environment for secure operation.
+                // 1. Get Environment Variables
                 window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
                 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-                const app = initializeApp(firebaseConfig);
-                window.db = getFirestore(app);
-                window.auth = getAuth(app);
-                setLogLevel('Debug');
-
-                if (initialAuthToken) {
-                    await signInWithCustomToken(window.auth, initialAuthToken);
+                
+                let firebaseConfig = {};
+                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                    try {
+                        firebaseConfig = JSON.parse(__firebase_config);
+                    } catch (e) {
+                        console.error("Failed to parse __firebase_config JSON:", e);
+                        firebaseConfig = {}; 
+                    }
+                }
+                
+                // 2. CRITICAL GUARDRAIL & FALLBACK: Check for essential config property
+                if (!firebaseConfig.projectId) {
+                    const errorMessage = 'WARNING: Firebase "projectId" is missing. Chat history **will not be saved** between sessions. Falling back to local chat.';
+                    loadingStatusElement.textContent = errorMessage;
+                    loadingStatusElement.classList.add('text-yellow-600', 'font-bold');
+                    console.warn(errorMessage, firebaseConfig);
+                    window.isFirestoreEnabled = false;
+                    // Continue script execution, but skip Firebase initialization
                 } else {
-                    await signInAnonymously(window.auth);
+                    // 3. Initialize App and Services
+                    const app = initializeApp(firebaseConfig);
+                    window.db = getFirestore(app);
+                    window.auth = getAuth(app);
+                    setLogLevel('Debug');
+
+                    // 4. Authenticate
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(window.auth, initialAuthToken);
+                    } else {
+                        await signInAnonymously(window.auth);
+                    }
+
+                    window.userId = window.auth.currentUser?.uid || crypto.randomUUID();
+                    document.getElementById('robot-id').textContent = `User ID: ${window.userId}`;
+                    window.isFirestoreEnabled = true;
                 }
 
-                window.userId = window.auth.currentUser?.uid || crypto.randomUUID();
-                
-                document.getElementById('robot-id').textContent = `User ID: ${window.userId}`;
-
-                // Once authenticated and services are set up, load the chat history
-                window.loadChatHistory();
+                // 5. Initialize Chat (whether locally or via Firestore)
+                window.initializeChat();
 
             } catch (error) {
+                // If anything other than projectId failure happened during init
                 console.error("Firebase Initialization Failed:", error);
-                document.getElementById('initial-loading-status').textContent = `Initialization Error: ${error.message}`;
+                loadingStatusElement.textContent = `Fatal Init Error (Disabling persistence): ${error.message}`;
+                loadingStatusElement.classList.add('text-red-600', 'font-bold');
+                window.isFirestoreEnabled = false;
+                // Still try to initialize chat locally
+                window.initializeChat();
             }
         };
     </script>
@@ -120,8 +150,10 @@
 
     <div class="w-full max-w-2xl flex flex-col items-center space-y-8">
         
+        <!-- Olivet Bot Display Area -->
         <div class="flex items-start w-full space-x-4">
             
+            <!-- Logo/Character Area -->
             <div class="flex-shrink-0 flex flex-col items-center space-y-2">
                 <div id="logo-container" class="robot-body rounded-full overflow-hidden flex items-center justify-center text-4xl text-blue-500 font-bold">
                     <div id="logo-placeholder">OB</div>
@@ -130,13 +162,16 @@
                 <small id="robot-id" class="text-xs text-gray-500"></small>
             </div>
 
+            <!-- Speech Bubble (Dynamic Content) -->
             <div class="flex-grow">
                 <div id="speech-bubble-display" class="speech-bubble h-[20rem]">
                     
+                    <!-- CONVERSATION HISTORY CONTAINER -->
                     <div id="chat-history-container" class="space-y-3 overflow-y-auto pr-2 flex flex-col" style="max-height: 15rem;">
                         <div id="initial-loading-status" class="text-gray-500 italic text-center">Connecting to Chat History...</div>
                     </div>
                     
+                    <!-- Input Area -->
                     <div id="chat-input-container" class="mt-4 pt-4 border-t border-gray-200 flex-shrink-0">
                         <form id="chat-form" onsubmit="sendMessage(event)">
                             <input 
@@ -158,6 +193,7 @@
                         </form>
                     </div>
 
+                    <!-- Voice Button (TTS) -->
                     <div class="flex justify-end pt-2">
                         <button 
                             id="speak-button"
@@ -170,6 +206,7 @@
                         </button>
                     </div>
 
+                    <!-- Hidden Loading Indicator -->
                     <div id="loading-spinner" class="absolute inset-0 bg-white bg-opacity-80 rounded-xl hidden items-center justify-center">
                         <div class="flex flex-col items-center space-y-2">
                             <svg class="spin-robot h-8 w-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -183,20 +220,17 @@
             </div>
         </div>
         
+        <!-- Error/Status Message Box -->
         <div id="status-message" class="w-full text-center text-red-600 font-medium hidden"></div>
 
     </div>
 
     <script type="module">
         // Global Variables
-        // IMPORTANT FIX: The API key must be an empty string for the Canvas environment to auto-provide it securely.
         const apiKey = ""; 
         const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
         const TTS_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent"; 
 
-        // ----------------------------------------------------------------------
-        // Logo Placeholder
-        // ----------------------------------------------------------------------
         const olivetLogoBase64 = null; 
 
         const GREETINGS = [
@@ -206,8 +240,7 @@
             "Ready for a chat? Tell me what you need, and I'll fetch the data.",
         ];
 
-        // Firestore Globals (These are set in window.firebaseInit)
-        // db, auth, userId, appId
+        // Firestore Globals (if enabled, will be populated by window.firebaseInit)
         let chatHistory = []; 
         
         const CHAT_COLLECTION_PATH = () => `/artifacts/${window.appId}/users/${window.userId}/chat_history`;
@@ -237,7 +270,7 @@
         }
 
         /**
-         * NEW: Consolidates the logic for enabling/disabling interactive controls.
+         * Consolidates the logic for enabling/disabling interactive controls.
          */
         function setControlsEnabled(enabled) {
             userPromptInput.disabled = !enabled;
@@ -269,15 +302,17 @@
          */
         function renderHistory() {
             const historyContainer = document.getElementById('chat-history-container');
-            // Ensure the initial loading status is hidden
             document.getElementById('initial-loading-status').style.display = 'none';
 
-            // Map the history array to HTML elements
-            historyContainer.innerHTML = chatHistory.map(msg => 
-                formatMessage(msg.parts[0].text, msg.role)
-            ).join('');
+            // Ensure history is rendered, even if empty
+            if (chatHistory.length === 0) {
+                 historyContainer.innerHTML = formatMessage("This is Olivet Bot. Your chat history is empty, let's start a conversation!", 'model');
+            } else {
+                historyContainer.innerHTML = chatHistory.map(msg => 
+                    formatMessage(msg.parts[0].text, msg.role)
+                ).join('');
+            }
             
-            // Auto-scroll to bottom after rendering
             historyContainer.scrollTop = historyContainer.scrollHeight;
 
             // Enable the speak button if the last message was from the model
@@ -285,77 +320,95 @@
         }
 
         /**
-         * Saves a message object (user or model) to Firestore.
+         * Saves a message object (user or model) to Firestore if enabled, otherwise saves locally.
          */
-        async function saveMessageToFirestore(role, text) {
-            try {
-                if (!window.db || !window.userId || !window.appId) {
-                    throw new Error("Firestore is not initialized.");
+        async function saveMessage(role, text) {
+            const newMessage = { role, parts: [{ text }], timestamp: new Date() };
+
+            if (window.isFirestoreEnabled) {
+                try {
+                    const chatRef = collection(window.db, CHAT_COLLECTION_PATH());
+                    await addDoc(chatRef, {
+                        role,
+                        text,
+                        timestamp: serverTimestamp() 
+                    });
+                    // Firestore listener handles updating chatHistory and rendering
+                } catch (error) {
+                    console.error("Error saving message to Firestore (disabling persistence):", error);
+                    displayStatus(`History save failed. Persistence disabled for this session: ${error.message}`, 'error');
+                    window.isFirestoreEnabled = false; // Disable on write failure
+                    // Fallback to local array
+                    chatHistory.push(newMessage);
+                    renderHistory();
                 }
-                const chatRef = collection(window.db, CHAT_COLLECTION_PATH());
-                await addDoc(chatRef, {
-                    role,
-                    text,
-                    timestamp: serverTimestamp() // Use server timestamp for ordering
-                });
-            } catch (error) {
-                console.error("Error saving message to Firestore:", error);
-                displayStatus(`History save failed: ${error.message}`, 'error');
+            } else {
+                // Local save and render
+                chatHistory.push(newMessage);
+                renderHistory();
             }
         }
         
         /**
-         * Loads chat history from Firestore using a real-time listener.
+         * Initializes the chat, either by loading history from Firestore or starting a local session.
          */
-        window.loadChatHistory = function() {
-            if (!window.db || !window.userId || !window.appId) {
-                console.error("Database or User ID not ready.");
-                return;
-            }
+        window.initializeChat = function() {
+            const loadingStatusElement = document.getElementById('initial-loading-status');
+            
+            if (window.isFirestoreEnabled) {
+                if (!window.db || !window.userId || !window.appId) {
+                    loadingStatusElement.textContent = "Error setting up Firestore listener. Switching to local chat.";
+                    window.isFirestoreEnabled = false;
+                    return window.initializeChat(); // Recurse to local mode
+                }
 
-            const chatRef = collection(window.db, CHAT_COLLECTION_PATH());
-            // NOTE: We still use orderBy here, despite the general warning, because it is essential for chat history
-            // and the app ID/user ID partition makes it easier to manage.
-            const q = query(chatRef, orderBy('timestamp', 'asc'));
-
-            // Set up real-time listener
-            onSnapshot(q, async (snapshot) => {
-                const wasEmpty = chatHistory.length === 0;
+                const chatRef = collection(window.db, CHAT_COLLECTION_PATH());
+                const q = query(chatRef, orderBy('timestamp', 'asc'));
                 
-                chatHistory = snapshot.docs.map(doc => {
-                    const data = doc.data();
-                    // Reformat the Firestore data back into the Gemini chat history structure
-                    return {
-                        role: data.role,
-                        parts: [{ text: data.text }]
-                    };
+                // Firestore Listener
+                onSnapshot(q, async (snapshot) => {
+                    const wasEmpty = chatHistory.length === 0;
+                    
+                    chatHistory = snapshot.docs.map(doc => {
+                        const data = doc.data();
+                        return {
+                            role: data.role,
+                            parts: [{ text: data.text }]
+                        };
+                    });
+                    
+                    if (wasEmpty && chatHistory.length === 0) {
+                        // First load, history empty: start new conversation & save greeting
+                        const initialGreeting = getRandomGreeting();
+                        await saveMessage('model', initialGreeting); 
+                        displayStatus("New conversation started. History saved to cloud.", 'success');
+                        setControlsEnabled(true);
+                    } else if (chatHistory.length > 0) {
+                        // History loaded or updated
+                        renderHistory();
+                        setControlsEnabled(true);
+                    }
+                    
+                }, (error) => {
+                    console.error("Firestore real-time listener failed (switching to local):", error);
+                    loadingStatusElement.textContent = `Failed to load history: ${error.message}. Switching to local chat.`;
+                    window.isFirestoreEnabled = false;
+                    // Attempt local init fallback
+                    window.initializeChat();
                 });
                 
-                // If history was empty and is now empty, initialize the conversation
-                if (wasEmpty && chatHistory.length === 0) {
+            } else {
+                // Local Chat Mode Fallback
+                loadingStatusElement.textContent = "Local Chat Mode (No history persistence)";
+                
+                if (chatHistory.length === 0) {
                     const initialGreeting = getRandomGreeting();
-                    // Save greeting to Firestore. The listener will fire again to render it.
-                    await saveMessageToFirestore('model', initialGreeting);
-                    displayStatus("New conversation started. History saved to cloud.", 'success');
-                    setControlsEnabled(true); // Enable controls after initiating chat
-                } 
-                // If history was empty and is now NOT empty (i.e., this is the first load)
-                else if (wasEmpty && chatHistory.length > 0) {
-                    renderHistory();
-                    setControlsEnabled(true); // Enable controls after initial history is loaded
-                    displayStatus("History loaded successfully!", 'success');
+                    chatHistory.push({ role: 'model', parts: [{ text: initialGreeting }] });
+                    displayStatus("New local session started. Persistence is disabled.", 'success');
                 }
-                // For all other updates (new messages, etc.)
-                else if (chatHistory.length > 0) {
-                    renderHistory();
-                    // FIX: Ensure controls are enabled if a message was just added and it wasn't the initial load
-                    setControlsEnabled(true); 
-                }
-
-            }, (error) => {
-                console.error("Firestore real-time listener failed:", error);
-                document.getElementById('initial-loading-status').textContent = `Failed to load history: ${error.message}`;
-            });
+                renderHistory();
+                setControlsEnabled(true);
+            }
         };
 
 
@@ -442,11 +495,6 @@
             isSpeaking = true;
 
             try {
-                // If API key is empty, the platform handles the injection.
-                if (apiKey) {
-                    console.warn("Using explicit API Key for TTS. Recommended to leave empty for environment security.");
-                }
-
                 const payload = {
                     contents: [{
                         parts: [{ text: textToSpeak }]
@@ -506,9 +554,9 @@
                 displayStatus(`TTS failed: ${error.message}. Check API key and billing.`, 'error');
             } finally {
                 if (!isSpeaking) {
-                    speakIcon.classList.remove('spin-robot');
-                    speakText.textContent = 'Speak Last Response';
-                    speakButton.disabled = false;
+                     speakIcon.classList.remove('spin-robot');
+                     speakText.textContent = 'Speak Last Response';
+                     speakButton.disabled = false;
                 }
             }
         };
@@ -544,8 +592,7 @@
             
             const userQuery = userPromptInput.value.trim();
             if (!userQuery) {
-                // FIX: Removed 'success' from status message to avoid confusion when just clearing input.
-                displayStatus(`Please enter a question or command.`, 'error'); 
+                displayStatus(`Please enter a question or command.`, 'success');
                 return;
             }
 
@@ -555,24 +602,13 @@
             speakButton.disabled = true;
             loadingSpinner.classList.remove('hidden');
 
-            // Construct the user message object for the API call
-            const newUserMessage = {
-                role: 'user',
-                parts: [{ text: userQuery }]
-            };
-
-            // 2. Save user message to Firestore. The real-time listener will handle rendering.
-            // This is asynchronous, but we will proceed with the API call immediately.
-            await saveMessageToFirestore('user', userQuery);
+            // 2. Save user message (local or cloud)
+            await saveMessage('user', userQuery);
 
             try {
-                // FIX: Create the full conversation history for the API call 
-                // by appending the new user message to the loaded history.
-                const conversationHistoryForApi = [...chatHistory, newUserMessage];
-
+                // The chatHistory array is kept up-to-date by saveMessage (local) or onSnapshot (cloud)
                 const payload = {
-                    // Send the complete history (loaded from Firestore + new message) for context
-                    contents: conversationHistoryForApi, 
+                    contents: chatHistory, 
                     systemInstruction: {
                         parts: [{ text: currentSystemInstruction }]
                     },
@@ -595,20 +631,19 @@
                     console.error("API response was missing text content.", result);
                 }
 
-                // 3. Save model's reply to Firestore. The listener will handle rendering and chatHistory update.
-                await saveMessageToFirestore('model', responseText);
+                // 3. Save model's reply (local or cloud)
+                await saveMessage('model', responseText);
                 
             } catch (error) {
                 console.error("Gemini API Error:", error);
-                // On error, save the error message as a model reply for persistence
-                await saveMessageToFirestore('model', `Oh dear! A computation error occurred: ${error.message}. Please check your API key and billing status.`);
+                // On error, save the error message as a model reply for persistence/local display
+                await saveMessage('model', `Oh dear! A computation error occurred: ${error.message}. Please check your API key and billing status.`);
                 displayStatus(`API Error: ${error.message}`, 'error');
 
             } finally {
                 // 4. Re-enable input and hide loading
                 loadingSpinner.classList.add('hidden');
-                // Controls are now primarily re-enabled by the Firestore listener's update cycle for consistency.
-                // setControlsEnabled(true); 
+                setControlsEnabled(true);
             }
         }
 
@@ -624,7 +659,7 @@
          * Initialization function
          */
         window.onload = async function() {
-            // 1. Initialize Firebase (this calls window.loadChatHistory internally)
+            // 1. Initialize Firebase or set up local fallback
             await window.firebaseInit();
             
             // 2. Set up the logo if base64 data is provided
@@ -637,8 +672,7 @@
                  logoPlaceholder.textContent = 'OB';
             }
 
-            // Controls will be enabled by loadChatHistory once connection is confirmed.
-            displayStatus("Waiting for cloud connection...", 'success');
+            displayStatus("App initialization complete. Start chatting!", 'success');
         };
 
     </script>
