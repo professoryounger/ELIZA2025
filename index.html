@@ -245,7 +245,7 @@
         
         const CHAT_COLLECTION_PATH = () => `/artifacts/${window.appId}/users/${window.userId}/chat_history`;
 
-        let currentSystemInstruction = "You are Olivet Bot, a friendly, professional, and slightly enthusiastic chatbot designed to be a supportive digital assistant. Your responses should be concise, helpful, and maintain a cheerful, conversational tone, always asking a brief follow-up question to encourage interaction.";
+        const currentSystemInstruction = "You are Olivet Bot, a friendly, professional, and slightly enthusiastic chatbot designed to be a supportive digital assistant. Your responses should be concise, helpful, and maintain a cheerful, conversational tone, always asking a brief follow-up question to encourage interaction.";
 
         const userPromptInput = document.getElementById('user-prompt');
         const sendButton = document.getElementById('send-button');
@@ -629,6 +629,8 @@
                     responseText = candidate.content.parts[0].text;
                 } else {
                     console.error("API response was missing text content.", result);
+                    // Provide a specific error message to the user
+                    responseText = "I received an empty response from the server. This usually indicates a network or API issue. Please try again in a moment!";
                 }
 
                 // 3. Save model's reply (local or cloud)
@@ -641,7 +643,7 @@
                 displayStatus(`API Error: ${error.message}`, 'error');
 
             } finally {
-                // 4. Re-enable input and hide loading
+                // 4. Re-enable input and hide loading - THIS IS CRITICAL FOR RECOVERY
                 loadingSpinner.classList.add('hidden');
                 setControlsEnabled(true);
             }
