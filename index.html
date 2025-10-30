@@ -74,7 +74,6 @@
             border-radius: 2px;
         }
     </style>
-    <!-- Firebase Imports for Sandbox Environment -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -121,12 +120,9 @@
 
     <div class="w-full max-w-2xl flex flex-col items-center space-y-8">
         
-        <!-- Olivet Bot Display Area -->
         <div class="flex items-start w-full space-x-4">
             
-            <!-- Logo/Character Area -->
             <div class="flex-shrink-0 flex flex-col items-center space-y-2">
-                <!-- LOGO CONTAINER: Currently holds the 'OB' placeholder. If the logo variable below is set, it will display the image. -->
                 <div id="logo-container" class="robot-body rounded-full overflow-hidden flex items-center justify-center text-4xl text-blue-500 font-bold">
                     <div id="logo-placeholder">OB</div>
                 </div>
@@ -134,16 +130,13 @@
                 <small id="robot-id" class="text-xs text-gray-500"></small>
             </div>
 
-            <!-- Speech Bubble (Dynamic Content) -->
             <div class="flex-grow">
                 <div id="speech-bubble-display" class="speech-bubble h-[20rem]">
                     
-                    <!-- CONVERSATION HISTORY CONTAINER -->
                     <div id="chat-history-container" class="space-y-3 overflow-y-auto pr-2 flex flex-col" style="max-height: 15rem;">
                         <div id="initial-loading-status" class="text-gray-500 italic text-center">Connecting to Chat History...</div>
                     </div>
                     
-                    <!-- Input Area -->
                     <div id="chat-input-container" class="mt-4 pt-4 border-t border-gray-200 flex-shrink-0">
                         <form id="chat-form" onsubmit="sendMessage(event)">
                             <input 
@@ -165,7 +158,6 @@
                         </form>
                     </div>
 
-                    <!-- Voice Button (TTS) -->
                     <div class="flex justify-end pt-2">
                         <button 
                             id="speak-button"
@@ -178,7 +170,6 @@
                         </button>
                     </div>
 
-                    <!-- Hidden Loading Indicator -->
                     <div id="loading-spinner" class="absolute inset-0 bg-white bg-opacity-80 rounded-xl hidden items-center justify-center">
                         <div class="flex flex-col items-center space-y-2">
                             <svg class="spin-robot h-8 w-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -192,7 +183,6 @@
             </div>
         </div>
         
-        <!-- Error/Status Message Box -->
         <div id="status-message" class="w-full text-center text-red-600 font-medium hidden"></div>
 
     </div>
@@ -358,6 +348,8 @@
                 // For all other updates (new messages, etc.)
                 else if (chatHistory.length > 0) {
                     renderHistory();
+                    // FIX: Ensure controls are enabled if a message was just added and it wasn't the initial load
+                    setControlsEnabled(true); 
                 }
 
             }, (error) => {
@@ -514,9 +506,9 @@
                 displayStatus(`TTS failed: ${error.message}. Check API key and billing.`, 'error');
             } finally {
                 if (!isSpeaking) {
-                     speakIcon.classList.remove('spin-robot');
-                     speakText.textContent = 'Speak Last Response';
-                     speakButton.disabled = false;
+                    speakIcon.classList.remove('spin-robot');
+                    speakText.textContent = 'Speak Last Response';
+                    speakButton.disabled = false;
                 }
             }
         };
@@ -552,7 +544,8 @@
             
             const userQuery = userPromptInput.value.trim();
             if (!userQuery) {
-                displayStatus(`Please enter a question or command.`, 'success');
+                // FIX: Removed 'success' from status message to avoid confusion when just clearing input.
+                displayStatus(`Please enter a question or command.`, 'error'); 
                 return;
             }
 
@@ -562,13 +555,24 @@
             speakButton.disabled = true;
             loadingSpinner.classList.remove('hidden');
 
+            // Construct the user message object for the API call
+            const newUserMessage = {
+                role: 'user',
+                parts: [{ text: userQuery }]
+            };
+
             // 2. Save user message to Firestore. The real-time listener will handle rendering.
+            // This is asynchronous, but we will proceed with the API call immediately.
             await saveMessageToFirestore('user', userQuery);
 
             try {
+                // FIX: Create the full conversation history for the API call 
+                // by appending the new user message to the loaded history.
+                const conversationHistoryForApi = [...chatHistory, newUserMessage];
+
                 const payload = {
-                    // Send the complete history (from Firestore listener) for context
-                    contents: chatHistory, 
+                    // Send the complete history (loaded from Firestore + new message) for context
+                    contents: conversationHistoryForApi, 
                     systemInstruction: {
                         parts: [{ text: currentSystemInstruction }]
                     },
@@ -603,7 +607,8 @@
             } finally {
                 // 4. Re-enable input and hide loading
                 loadingSpinner.classList.add('hidden');
-                setControlsEnabled(true);
+                // Controls are now primarily re-enabled by the Firestore listener's update cycle for consistency.
+                // setControlsEnabled(true); 
             }
         }
 
