@@ -78,9 +78,12 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, setDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+        // IMPORTANT: The global variables (db, auth, userId, appId) are now assigned directly to the window object.
+        // This is done to ensure the global functions like sendMessage have access to them immediately.
+        
         window.firebaseInit = async () => {
             try {
                 // IMPORTANT: The variables __app_id, __firebase_config, and __initial_auth_token
@@ -90,19 +93,17 @@
                 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
                 const app = initializeApp(firebaseConfig);
-                const db = getFirestore(app);
-                const auth = getAuth(app);
+                window.db = getFirestore(app);
+                window.auth = getAuth(app);
                 setLogLevel('Debug');
 
                 if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
+                    await signInWithCustomToken(window.auth, initialAuthToken);
                 } else {
-                    await signInAnonymously(auth);
+                    await signInAnonymously(window.auth);
                 }
 
-                window.db = db;
-                window.auth = auth;
-                window.userId = auth.currentUser?.uid || crypto.randomUUID();
+                window.userId = window.auth.currentUser?.uid || crypto.randomUUID();
                 
                 document.getElementById('robot-id').textContent = `User ID: ${window.userId}`;
 
@@ -111,6 +112,7 @@
 
             } catch (error) {
                 console.error("Firebase Initialization Failed:", error);
+                document.getElementById('initial-loading-status').textContent = `Initialization Error: ${error.message}`;
             }
         };
     </script>
@@ -197,13 +199,13 @@
 
     <script type="module">
         // Global Variables
-        // WARNING: If hosting publicly (like GitHub Pages), replace the empty string below with your actual API key.
-        const apiKey = "AIzaSyBaUh7CiEA_Ugwz6_Xa4D4dV8sYyIb2TMs"; // User's key
+        // IMPORTANT FIX: The API key must be an empty string for the Canvas environment to auto-provide it securely.
+        const apiKey = ""; 
         const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
         const TTS_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent"; 
 
         // ----------------------------------------------------------------------
-        // 🚨 IMPORTANT: PASTE YOUR LOGO BASE64 DATA HERE
+        // Logo Placeholder
         // ----------------------------------------------------------------------
         const olivetLogoBase64 = null; 
 
@@ -214,14 +216,11 @@
             "Ready for a chat? Tell me what you need, and I'll fetch the data.",
         ];
 
-        // Firestore Globals
-        let db;
-        let auth;
-        let userId;
-        let appId;
-        let chatHistory = []; // This will be updated by the Firestore listener
+        // Firestore Globals (These are set in window.firebaseInit)
+        // db, auth, userId, appId
+        let chatHistory = []; 
         
-        const CHAT_COLLECTION_PATH = () => `/artifacts/${appId}/users/${userId}/chat_history`;
+        const CHAT_COLLECTION_PATH = () => `/artifacts/${window.appId}/users/${window.userId}/chat_history`;
 
         let currentSystemInstruction = "You are Olivet Bot, a friendly, professional, and slightly enthusiastic chatbot designed to be a supportive digital assistant. Your responses should be concise, helpful, and maintain a cheerful, conversational tone, always asking a brief follow-up question to encourage interaction.";
 
@@ -246,6 +245,18 @@
                 statusMessageElement.classList.add('hidden');
             }, 5000);
         }
+
+        /**
+         * NEW: Consolidates the logic for enabling/disabling interactive controls.
+         */
+        function setControlsEnabled(enabled) {
+            userPromptInput.disabled = !enabled;
+            sendButton.disabled = !enabled;
+            if (enabled) {
+                userPromptInput.focus();
+            }
+        }
+
 
         /**
          * Utility to format messages for display (handles basic bolding and roles).
@@ -288,10 +299,10 @@
          */
         async function saveMessageToFirestore(role, text) {
             try {
-                if (!db || !userId || !appId) {
+                if (!window.db || !window.userId || !window.appId) {
                     throw new Error("Firestore is not initialized.");
                 }
-                const chatRef = collection(db, CHAT_COLLECTION_PATH());
+                const chatRef = collection(window.db, CHAT_COLLECTION_PATH());
                 await addDoc(chatRef, {
                     role,
                     text,
@@ -307,17 +318,19 @@
          * Loads chat history from Firestore using a real-time listener.
          */
         window.loadChatHistory = function() {
-            if (!db || !userId || !appId) {
+            if (!window.db || !window.userId || !window.appId) {
                 console.error("Database or User ID not ready.");
                 return;
             }
 
-            const chatRef = collection(db, CHAT_COLLECTION_PATH());
+            const chatRef = collection(window.db, CHAT_COLLECTION_PATH());
+            // NOTE: We still use orderBy here, despite the general warning, because it is essential for chat history
+            // and the app ID/user ID partition makes it easier to manage.
             const q = query(chatRef, orderBy('timestamp', 'asc'));
 
             // Set up real-time listener
             onSnapshot(q, async (snapshot) => {
-                let initialLoad = chatHistory.length === 0 && !snapshot.empty;
+                const wasEmpty = chatHistory.length === 0;
                 
                 chatHistory = snapshot.docs.map(doc => {
                     const data = doc.data();
@@ -327,23 +340,26 @@
                         parts: [{ text: data.text }]
                     };
                 });
-
-                if (chatHistory.length === 0) {
-                    // If the collection is empty, automatically add the first greeting
+                
+                // If history was empty and is now empty, initialize the conversation
+                if (wasEmpty && chatHistory.length === 0) {
                     const initialGreeting = getRandomGreeting();
+                    // Save greeting to Firestore. The listener will fire again to render it.
                     await saveMessageToFirestore('model', initialGreeting);
                     displayStatus("New conversation started. History saved to cloud.", 'success');
-                    
-                } else {
+                    setControlsEnabled(true); // Enable controls after initiating chat
+                } 
+                // If history was empty and is now NOT empty (i.e., this is the first load)
+                else if (wasEmpty && chatHistory.length > 0) {
                     renderHistory();
-                    if (initialLoad) {
-                        // Only enable controls after the first successful load
-                        userPromptInput.disabled = false;
-                        sendButton.disabled = false;
-                        userPromptInput.focus();
-                        displayStatus("History loaded successfully!", 'success');
-                    }
+                    setControlsEnabled(true); // Enable controls after initial history is loaded
+                    displayStatus("History loaded successfully!", 'success');
                 }
+                // For all other updates (new messages, etc.)
+                else if (chatHistory.length > 0) {
+                    renderHistory();
+                }
+
             }, (error) => {
                 console.error("Firestore real-time listener failed:", error);
                 document.getElementById('initial-loading-status').textContent = `Failed to load history: ${error.message}`;
@@ -352,7 +368,7 @@
 
 
         /**
-         * Converts Base64 audio data to an ArrayBuffer.
+         * Converts Base64 audio data to an ArrayBuffer. (TTS helper)
          */
         function base64ToArrayBuffer(base64) {
             const binaryString = atob(base64);
@@ -365,8 +381,7 @@
         }
 
         /**
-         * Converts PCM 16-bit audio data into a WAV Blob.
-         * The function adds the necessary WAV header information.
+         * Converts PCM 16-bit audio data into a WAV Blob. (TTS helper)
          */
         function pcmToWav(pcm16, sampleRate) {
             const pcmData = pcm16.buffer;
@@ -418,9 +433,7 @@
          * Converts the last text response into speech and plays it.
          */
         window.speakLastResponse = async function () {
-            if (isSpeaking) {
-                return;
-            }
+            if (isSpeaking) { return; }
 
             const lastMessage = chatHistory.findLast(msg => msg.role === 'model');
             if (!lastMessage) {
@@ -437,11 +450,11 @@
             isSpeaking = true;
 
             try {
-                if (!apiKey) {
-                    throw new Error("API Key is missing for Text-to-Speech service.");
+                // If API key is empty, the platform handles the injection.
+                if (apiKey) {
+                    console.warn("Using explicit API Key for TTS. Recommended to leave empty for environment security.");
                 }
 
-                // API Payload for TTS
                 const payload = {
                     contents: [{
                         parts: [{ text: textToSpeak }]
@@ -450,7 +463,6 @@
                         responseModalities: ["AUDIO"],
                         speechConfig: {
                             voiceConfig: {
-                                // Using the firm and clear 'Kore' voice
                                 prebuiltVoiceConfig: { voiceName: "Kore" }
                             }
                         }
@@ -474,26 +486,22 @@
                     throw new Error("TTS API response did not contain valid PCM audio data. Check that the TTS API is enabled.");
                 }
 
-                // Extract sample rate from mimeType, e.g., audio/L16;rate=24000
                 const rateMatch = mimeType.match(/rate=(\d+)/);
                 const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
                 
                 const pcmData = base64ToArrayBuffer(audioData);
-                // API returns signed PCM16 audio data.
                 const pcm16 = new Int16Array(pcmData); 
                 
-                // Convert PCM data to a playable WAV Blob
                 const wavBlob = pcmToWav(pcm16, sampleRate);
                 const audioUrl = URL.createObjectURL(wavBlob);
                 
-                // Play the audio
                 const audio = new Audio(audioUrl);
                 
                 speakText.textContent = 'Speaking...';
-                speakIcon.classList.remove('spin-robot'); // Stop spin, show playback status
+                speakIcon.classList.remove('spin-robot');
 
                 audio.onended = () => {
-                    URL.revokeObjectURL(audioUrl); // Clean up the URL object
+                    URL.revokeObjectURL(audioUrl);
                     isSpeaking = false;
                     speakText.textContent = 'Speak Last Response';
                     speakButton.disabled = false;
@@ -503,9 +511,8 @@
 
             } catch (error) {
                 console.error("TTS Error:", error);
-                displayStatus(`TTS failed: ${error.message}. Check that the TTS API is enabled.`, 'error');
+                displayStatus(`TTS failed: ${error.message}. Check API key and billing.`, 'error');
             } finally {
-                // Ensure the button is re-enabled if the playback failed before starting
                 if (!isSpeaking) {
                      speakIcon.classList.remove('spin-robot');
                      speakText.textContent = 'Speak Last Response';
@@ -543,36 +550,28 @@
         window.sendMessage = async function (event) {
             event.preventDefault();
             
-            if (!apiKey) {
-                displayStatus("API Key is missing. Please insert your key in the JavaScript code to enable generation.");
-                return;
-            }
-
             const userQuery = userPromptInput.value.trim();
             if (!userQuery) {
                 displayStatus(`Please enter a question or command.`, 'success');
                 return;
             }
 
-            // 1. Save user message to Firestore. The real-time listener will handle rendering.
-            userPromptInput.value = ''; // Clear input field
-            await saveMessageToFirestore('user', userQuery);
-
-            // 2. Disable input and show loading
-            userPromptInput.disabled = true;
-            sendButton.disabled = true;
+            // 1. Clear input and disable controls immediately
+            userPromptInput.value = '';
+            setControlsEnabled(false);
             speakButton.disabled = true;
             loadingSpinner.classList.remove('hidden');
+
+            // 2. Save user message to Firestore. The real-time listener will handle rendering.
+            await saveMessageToFirestore('user', userQuery);
 
             try {
                 const payload = {
                     // Send the complete history (from Firestore listener) for context
                     contents: chatHistory, 
                     systemInstruction: {
-                        // Reinforce the persona and conversational rules
                         parts: [{ text: currentSystemInstruction }]
                     },
-                    // Using grounding tools to ensure current information
                     tools: [{ "google_search": {} }],
                 };
 
@@ -604,10 +603,7 @@
             } finally {
                 // 4. Re-enable input and hide loading
                 loadingSpinner.classList.add('hidden');
-                userPromptInput.disabled = false;
-                sendButton.disabled = false;
-                // Speak button status handled by renderHistory after Firestore update
-                userPromptInput.focus();
+                setControlsEnabled(true);
             }
         }
 
@@ -631,17 +627,13 @@
             const logoPlaceholder = document.getElementById('logo-placeholder');
             
             if (olivetLogoBase64) {
-                 // If the user pasted their logo data, use it
                  logoContainer.innerHTML = `<img src="data:image/png;base64,${olivetLogoBase64}" alt="Olivet Bot Logo" class="w-full h-full object-cover">`;
             } else {
-                 // Otherwise, use the 'OB' initials placeholder
                  logoPlaceholder.textContent = 'OB';
             }
 
-            // Check if API key is present for a strong warning
-            if (!apiKey) {
-                displayStatus("🚨 WARNING: API Key is missing. API calls will fail when the Send button is clicked.", 'error');
-            }
+            // Controls will be enabled by loadChatHistory once connection is confirmed.
+            displayStatus("Waiting for cloud connection...", 'success');
         };
 
     </script>
