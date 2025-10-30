@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ELIZA 2025 - Conversational Interface</title>
+    <title>Olivet Bot - Conversational Interface</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -29,6 +29,9 @@
             border-radius: 1rem;
             padding: 1.5rem;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            display: flex; 
+            flex-direction: column;
+            justify-content: space-between;
         }
         .speech-bubble:after {
             content: '';
@@ -47,7 +50,7 @@
         }
         #user-prompt {
             width: 100%;
-            padding-right: 4rem; /* Make space for the button */
+            padding-right: 4rem; 
         }
         #send-button {
             position: absolute;
@@ -61,6 +64,14 @@
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
+        }
+        /* Hide scrollbar for aesthetics but allow scrolling */
+        #chat-history-container::-webkit-scrollbar {
+            width: 4px;
+        }
+        #chat-history-container::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 2px;
         }
     </style>
     <!-- Firebase Imports for Sandbox Environment -->
@@ -105,33 +116,36 @@
 
     <div class="w-full max-w-2xl flex flex-col items-center space-y-8">
         
-        <!-- ELIZA 2025 Display Area -->
+        <!-- Olivet Bot Display Area -->
         <div class="flex items-start w-full space-x-4">
             
-            <!-- Robot Character Area -->
+            <!-- Logo/Character Area -->
             <div class="flex-shrink-0 flex flex-col items-center space-y-2">
-                <div id="robot-container" class="robot-body rounded-full overflow-hidden flex items-center justify-center text-4xl text-blue-500 font-bold">
-                    <div id="robot-initials">E2</div>
+                <!-- LOGO CONTAINER: Currently holds the 'OB' placeholder. If the logo variable below is set, it will display the image. -->
+                <div id="logo-container" class="robot-body rounded-full overflow-hidden flex items-center justify-center text-4xl text-blue-500 font-bold">
+                    <div id="logo-placeholder">OB</div>
                 </div>
-                <div id="robot-name" class="text-xl font-bold text-gray-700">ELIZA 2025</div>
+                <div id="robot-name" class="text-xl font-bold text-gray-700">Olivet Bot</div>
                 <small id="robot-id" class="text-xs text-gray-500"></small>
             </div>
 
             <!-- Speech Bubble (Dynamic Content) -->
             <div class="flex-grow">
-                <div id="speech-bubble-display" class="speech-bubble h-40 flex flex-col justify-between">
-                    <div id="eliza-text" class="text-gray-700 leading-relaxed overflow-y-auto max-h-24">
-                        <span id="initial-greeting">Loading ELIZA 2025...</span>
+                <div id="speech-bubble-display" class="speech-bubble h-[20rem]">
+                    
+                    <!-- CONVERSATION HISTORY CONTAINER -->
+                    <div id="chat-history-container" class="space-y-3 overflow-y-auto pr-2 flex flex-col" style="max-height: 15rem;">
+                        <div id="initial-loading-status" class="text-gray-500 italic text-center">Loading Olivet Bot...</div>
                     </div>
                     
                     <!-- Input Area -->
-                    <div id="chat-input-container" class="mt-4 pt-4 border-t border-gray-200">
+                    <div id="chat-input-container" class="mt-4 pt-4 border-t border-gray-200 flex-shrink-0">
                         <form id="chat-form" onsubmit="sendMessage(event)">
                             <input 
                                 type="text" 
                                 id="user-prompt" 
                                 class="border border-gray-300 p-2 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-sm" 
-                                placeholder="Type your query here..."
+                                placeholder="Ask Olivet Bot a question..."
                                 autocomplete="off"
                                 disabled
                             >
@@ -146,6 +160,19 @@
                         </form>
                     </div>
 
+                    <!-- Voice Button (TTS) -->
+                    <div class="flex justify-end pt-2">
+                        <button 
+                            id="speak-button"
+                            onclick="speakLastResponse()"
+                            class="flex items-center space-x-1 text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                            disabled
+                        >
+                            <svg id="speak-icon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4z"/><path d="M15.54 8.46a6 6 0 010 7.08"/><path d="M19.07 4.93a12 12 0 010 14.14"/></svg>
+                            <span id="speak-text">Speak Last Response</span>
+                        </button>
+                    </div>
+
                     <!-- Hidden Loading Indicator -->
                     <div id="loading-spinner" class="absolute inset-0 bg-white bg-opacity-80 rounded-xl hidden items-center justify-center">
                         <div class="flex flex-col items-center space-y-2">
@@ -153,7 +180,7 @@
                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                             </svg>
-                            <span class="text-blue-600 text-sm font-semibold">ELIZA is calculating...</span>
+                            <span class="text-blue-600 text-sm font-semibold">Olivet Bot is processing...</span>
                         </div>
                     </div>
                 </div>
@@ -168,30 +195,39 @@
     <script type="module">
         // Global Variables
         // WARNING: If hosting publicly (like GitHub Pages), replace the empty string below with your actual API key.
-        // Putting the key in public frontend code is insecure.
-        const apiKey = "AIzaSyCuZcwFcjmnmEfI2_dXWk_PzyXbT2XTCH8";
+        const apiKey = "AIzaSyBaUh7CiEA_Ugwz6_Xa4D4dV8sYyIb2TMs"; // User's key (used for demonstration purposes)
         const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
-        const IMAGEN_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict";
+        const TTS_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent"; 
+
+        // ----------------------------------------------------------------------
+        // 🚨 IMPORTANT: PASTE YOUR LOGO BASE64 DATA HERE
+        // Replace 'null' with a string starting with 'iVBORw...' 
+        // Example: const olivetLogoBase64 = "iVBORw0KGgoAAAANSUhEUgAAA[...]";
+        // ----------------------------------------------------------------------
+        const olivetLogoBase64 = null; 
 
         const GREETINGS = [
-            "How can I help you today? I'm ready to compute!",
-            "What's on your mind, human? Let's process some ideas!",
-            "Greetings! I am ELIZA 2025. What interesting query do you have for me?",
+            "Welcome to Olivet Bot! I am ready to assist you. What can I do for you today?",
+            "Hello! I am Olivet Bot. What interesting query do you have for me?",
+            "Greetings! I'm here to process your requests. How may I help you?",
             "Ready for a chat? Tell me what you need, and I'll fetch the data.",
-            "Bleep Bloop! I'm listening. Ask me anything, and I'll be happy to assist!"
         ];
 
-        const elizaTextElement = document.getElementById('eliza-text');
+        let chatHistory = []; 
+        let currentSystemInstruction = "You are Olivet Bot, a friendly, professional, and slightly enthusiastic chatbot designed to be a supportive digital assistant. Your responses should be concise, helpful, and maintain a cheerful, conversational tone, always asking a brief follow-up question to encourage interaction.";
+
         const userPromptInput = document.getElementById('user-prompt');
         const sendButton = document.getElementById('send-button');
+        const speakButton = document.getElementById('speak-button');
+        const speakText = document.getElementById('speak-text');
+        const speakIcon = document.getElementById('speak-icon');
         const loadingSpinner = document.getElementById('loading-spinner');
         const statusMessageElement = document.getElementById('status-message');
-        let currentSystemInstruction = "You are ELIZA 2025, a friendly, slightly vintage-sounding chatbot. Your responses should be concise, helpful, and maintain a cheerful, conversational tone, always asking a follow-up question to encourage interaction.";
+        let isSpeaking = false;
+
 
         /**
          * Utility function to display a temporary status message.
-         * @param {string} message The message to display.
-         * @param {string} type 'success' or 'error'
          */
         function displayStatus(message, type = 'error') {
             statusMessageElement.textContent = message;
@@ -203,18 +239,220 @@
         }
 
         /**
+         * Utility to format messages for display (handles basic bolding and roles).
+         */
+        function formatMessage(text, role) {
+            // Simple Markdown bolding
+            const content = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            
+            if (role === 'user') {
+                // User messages are blue and aligned right
+                return `<div class="p-2 bg-blue-50 text-gray-700 rounded-lg shadow-sm self-end max-w-[80%] ml-auto text-sm"><strong>You:</strong> ${content}</div>`;
+            } else {
+                // Model messages are gray and aligned left
+                return `<div class="p-3 bg-gray-100 text-gray-800 rounded-lg shadow-sm self-start max-w-[90%] text-sm">${content}</div>`;
+            }
+        }
+
+        /**
+         * Renders the entire chat history to the container and auto-scrolls.
+         */
+        function renderHistory() {
+            const historyContainer = document.getElementById('chat-history-container');
+            // Ensure the initial loading status is hidden
+            document.getElementById('initial-loading-status').style.display = 'none';
+
+            // Map the history array to HTML elements
+            historyContainer.innerHTML = chatHistory.map(msg => 
+                formatMessage(msg.parts[0].text, msg.role)
+            ).join('');
+            
+            // Auto-scroll to bottom after rendering
+            historyContainer.scrollTop = historyContainer.scrollHeight;
+
+            // Enable the speak button if the last message was from the model
+            speakButton.disabled = chatHistory.length === 0 || chatHistory[chatHistory.length - 1].role !== 'model';
+        }
+
+        /**
+         * Converts Base64 audio data to an ArrayBuffer.
+         */
+        function base64ToArrayBuffer(base64) {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        /**
+         * Converts PCM 16-bit audio data into a WAV Blob.
+         * The function adds the necessary WAV header information.
+         */
+        function pcmToWav(pcm16, sampleRate) {
+            const pcmData = pcm16.buffer;
+            const numChannels = 1;
+            const bitsPerSample = 16;
+            const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+            const blockAlign = numChannels * (bitsPerSample / 8);
+            const subChunk1Size = 16;
+            const chunkId = 0x52494646; // 'RIFF'
+            const format = 0x57415645; // 'WAVE'
+            const subChunk1Id = 0x666d7420; // 'fmt '
+            const audioFormat = 1; // PCM
+            const subChunk2Id = 0x64617461; // 'data'
+
+            const buffer = new ArrayBuffer(44 + pcmData.byteLength);
+            const view = new DataView(buffer);
+
+            // Helper to write a string (4 characters)
+            function writeString(view, offset, str) {
+                for (let i = 0; i < str.length; i++) {
+                    view.setUint8(offset + i, str.charCodeAt(i));
+                }
+            }
+
+            // RIFF chunk descriptor
+            view.setUint32(0, chunkId, false); // 'RIFF'
+            view.setUint32(4, 36 + pcmData.byteLength, true); // Chunk size
+            view.setUint32(8, format, false); // 'WAVE'
+
+            // 'fmt ' sub-chunk
+            view.setUint32(12, subChunk1Id, false); // 'fmt '
+            view.setUint32(16, subChunk1Size, true); // Sub-chunk size (16 for PCM)
+            view.setUint16(20, audioFormat, true); // Audio format (1 for PCM)
+            view.setUint16(22, numChannels, true); // Number of channels (1)
+            view.setUint32(24, sampleRate, true); // Sample rate
+            view.setUint32(28, byteRate, true); // Byte rate
+            view.setUint16(32, blockAlign, true); // Block align
+            view.setUint16(34, bitsPerSample, true); // Bits per sample
+
+            // 'data' sub-chunk
+            view.setUint32(36, subChunk2Id, false); // 'data'
+            view.setUint32(40, pcmData.byteLength, true); // Sub-chunk size
+
+            // Write PCM data
+            const pcmBytes = new Uint8Array(pcmData);
+            let offset = 44;
+            for (let i = 0; i < pcmData.byteLength; i++) {
+                view.setUint8(offset + i, pcmBytes[i]);
+            }
+
+            return new Blob([buffer], { type: 'audio/wav' });
+        }
+
+
+        /**
+         * Converts the last text response into speech and plays it.
+         */
+        window.speakLastResponse = async function () {
+            if (isSpeaking) {
+                return;
+            }
+
+            const lastMessage = chatHistory.findLast(msg => msg.role === 'model');
+            if (!lastMessage) {
+                displayStatus("There is no Olivet Bot response to speak!", 'error');
+                return;
+            }
+
+            const textToSpeak = lastMessage.parts[0].text;
+            
+            // UI state change for speaking
+            speakButton.disabled = true;
+            speakText.textContent = 'Generating Voice...';
+            speakIcon.classList.add('spin-robot');
+            isSpeaking = true;
+
+            try {
+                if (!apiKey) {
+                    throw new Error("API Key is missing for Text-to-Speech service.");
+                }
+
+                // API Payload for TTS
+                const payload = {
+                    contents: [{
+                        parts: [{ text: textToSpeak }]
+                    }],
+                    generationConfig: {
+                        responseModalities: ["AUDIO"],
+                        speechConfig: {
+                            voiceConfig: {
+                                // Using the firm and clear 'Kore' voice
+                                prebuiltVoiceConfig: { voiceName: "Kore" }
+                            }
+                        }
+                    },
+                    model: "gemini-2.5-flash-preview-tts"
+                };
+
+                const options = {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                };
+
+                const result = await fetchWithBackoff(TTS_API_URL, options);
+                
+                const part = result?.candidates?.[0]?.content?.parts?.[0];
+                const audioData = part?.inlineData?.data;
+                const mimeType = part?.inlineData?.mimeType;
+
+                if (!audioData || !mimeType || !mimeType.startsWith("audio/L16")) {
+                    throw new Error("TTS API response did not contain valid PCM audio data. Check that the TTS API is enabled.");
+                }
+
+                // Extract sample rate from mimeType, e.g., audio/L16;rate=24000
+                const rateMatch = mimeType.match(/rate=(\d+)/);
+                const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+                
+                const pcmData = base64ToArrayBuffer(audioData);
+                // API returns signed PCM16 audio data.
+                const pcm16 = new Int16Array(pcmData); 
+                
+                // Convert PCM data to a playable WAV Blob
+                const wavBlob = pcmToWav(pcm16, sampleRate);
+                const audioUrl = URL.createObjectURL(wavBlob);
+                
+                // Play the audio
+                const audio = new Audio(audioUrl);
+                
+                speakText.textContent = 'Speaking...';
+                speakIcon.classList.remove('spin-robot'); // Stop spin, show playback status
+
+                audio.onended = () => {
+                    URL.revokeObjectURL(audioUrl); // Clean up the URL object
+                    isSpeaking = false;
+                    speakText.textContent = 'Speak Last Response';
+                    speakButton.disabled = false;
+                };
+
+                audio.play();
+
+            } catch (error) {
+                console.error("TTS Error:", error);
+                displayStatus(`TTS failed: ${error.message}. Check that the TTS API is enabled.`, 'error');
+            } finally {
+                // Ensure the button is re-enabled if the playback failed before starting
+                if (!isSpeaking) {
+                     speakIcon.classList.remove('spin-robot');
+                     speakText.textContent = 'Speak Last Response';
+                     speakButton.disabled = false;
+                }
+            }
+        };
+
+
+        /**
          * Fetches data from a given API URL with exponential backoff.
-         * @param {string} url The API endpoint URL.
-         * @param {object} options Fetch options (method, headers, body).
-         * @param {number} retries The current number of retries (default 0).
-         * @returns {Promise<object>} The JSON response from the API.
          */
         async function fetchWithBackoff(url, options, retries = 0) {
             try {
                 const response = await fetch(url, options);
                 if (response.status === 429 && retries < 5) { // Too Many Requests
                     const delay = Math.pow(2, retries) * 1000 + Math.random() * 1000;
-                    console.warn(`Rate limit hit. Retrying in ${Math.round(delay / 1000)}s...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     return fetchWithBackoff(url, options, retries + 1);
                 }
@@ -230,66 +468,6 @@
         }
 
         /**
-         * Generates the ELIZA 2025 robot image using Imagen 3.0.
-         */
-        async function animateRobotImage() {
-            const robotContainer = document.getElementById('robot-container');
-            const initialsElement = document.getElementById('robot-initials');
-
-            if (!apiKey) {
-                console.warn("API Key is empty. Skipping image generation.");
-                initialsElement.textContent = 'E2';
-                return;
-            }
-
-            try {
-                // Show loading state
-                initialsElement.textContent = '';
-                robotContainer.classList.add('spin-robot');
-                
-                const imagePrompt = "A futuristic, friendly cartoon robot named ELIZA 2025, with large friendly eyes, and a smooth white and blue chassis, designed in a playful, stylized vector art style. Circular body, vector art.";
-                
-                const payload = {
-                    instances: [{ prompt: imagePrompt }],
-                    parameters: { "sampleCount": 1 }
-                };
-
-                const options = {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                };
-
-                const result = await fetchWithBackoff(IMAGEN_API_URL, options);
-
-                const base64Data = result?.predictions?.[0]?.bytesBase64Encoded;
-
-                if (base64Data) {
-                    const imageUrl = `data:image/png;base64,${base64Data}`;
-                    robotContainer.innerHTML = `<img src="${imageUrl}" alt="ELIZA 2025" class="w-full h-full object-cover">`;
-                } else {
-                    throw new Error("Imagen generation failed to return image data.");
-                }
-
-            } catch (error) {
-                console.error("Image generation error:", error);
-                displayStatus("Could not generate the unique ELIZA 2025 image. Defaulting to E2 initials.");
-                robotContainer.innerHTML = '';
-                initialsElement.textContent = 'E2';
-            } finally {
-                robotContainer.classList.remove('spin-robot');
-            }
-        }
-
-        /**
-         * Gets a random greeting from the array.
-         */
-        function getRandomGreeting() {
-            const index = Math.floor(Math.random() * GREETINGS.length);
-            return GREETINGS[index];
-        }
-
-        /**
          * Main function to handle sending the user's message.
          */
         window.sendMessage = async function (event) {
@@ -302,27 +480,30 @@
 
             const userQuery = userPromptInput.value.trim();
             if (!userQuery) {
-                elizaTextElement.innerHTML = `<span class="text-gray-400 italic">Please enter a question or command.</span>`;
+                displayStatus(`Please enter a question or command.`, 'success');
                 return;
             }
 
-            // 1. Update the speech bubble with the user's message (as if the robot read it)
-            const oldGreeting = elizaTextElement.textContent.trim();
-            elizaTextElement.innerHTML = `**Human:** ${userQuery}`;
+            // 1. Add user message to history and render
+            chatHistory.push({ role: "user", parts: [{ text: userQuery }] });
+            renderHistory();
             userPromptInput.value = ''; // Clear input field
 
             // 2. Disable input and show loading
             userPromptInput.disabled = true;
             sendButton.disabled = true;
+            speakButton.disabled = true; // Disable speak button while generating
             loadingSpinner.classList.remove('hidden');
 
             try {
                 const payload = {
-                    contents: [{ parts: [{ text: userQuery }] }],
+                    // Send the complete history for context
+                    contents: chatHistory, 
                     systemInstruction: {
-                        parts: [{ text: currentSystemInstruction + `\n\nUser's previous prompt was: "${oldGreeting}". Your reply must directly address the current query.` }]
+                        // Reinforce the persona and conversational rules
+                        parts: [{ text: currentSystemInstruction }]
                     },
-                    // Using grounding tools to ensure Eliza has current information
+                    // Using grounding tools to ensure current information
                     tools: [{ "google_search": {} }],
                 };
 
@@ -342,12 +523,15 @@
                     console.error("API response was missing text content.", result);
                 }
 
-                // 3. Update speech bubble with the robot's reply
-                elizaTextElement.textContent = responseText;
+                // 3. Add model's reply to history and render
+                chatHistory.push({ role: "model", parts: [{ text: responseText }] });
+                renderHistory();
                 
             } catch (error) {
                 console.error("Gemini API Error:", error);
-                elizaTextElement.textContent = `Oh dear! A computation error occurred: ${error.message}. Perhaps try a different question?`;
+                // On error, the model message is added to the history so the user knows what happened.
+                chatHistory.push({ role: "model", parts: [{ text: `Oh dear! A computation error occurred: ${error.message}. Please check your API key and billing status in the console.` }] });
+                renderHistory();
                 displayStatus(`API Error: ${error.message}`, 'error');
 
             } finally {
@@ -355,8 +539,17 @@
                 loadingSpinner.classList.add('hidden');
                 userPromptInput.disabled = false;
                 sendButton.disabled = false;
+                // renderHistory already updates the speak button status
                 userPromptInput.focus();
             }
+        }
+
+        /**
+         * Gets a random greeting from the array.
+         */
+        function getRandomGreeting() {
+            const index = Math.floor(Math.random() * GREETINGS.length);
+            return GREETINGS[index];
         }
 
         /**
@@ -366,12 +559,25 @@
             // 1. Initialize Firebase (for secure environment setup)
             await window.firebaseInit();
             
-            // 2. Load the image for ELIZA 2025
-            await animateRobotImage();
+            // 2. Set up the logo if base64 data is provided
+            const logoContainer = document.getElementById('logo-container');
+            const logoPlaceholder = document.getElementById('logo-placeholder');
+            
+            if (olivetLogoBase64) {
+                 // If the user pasted their logo data, use it
+                 logoContainer.innerHTML = `<img src="data:image/png;base64,${olivetLogoBase64}" alt="Olivet Bot Logo" class="w-full h-full object-cover">`;
+            } else {
+                 // Otherwise, use the 'OB' initials placeholder
+                 logoPlaceholder.textContent = 'OB';
+            }
+
 
             // 3. Set initial greeting and enable interaction
             const initialGreeting = getRandomGreeting();
-            elizaTextElement.textContent = initialGreeting;
+            
+            // Add initial greeting to history and render
+            chatHistory.push({ role: "model", parts: [{ text: initialGreeting }] });
+            renderHistory();
             
             userPromptInput.disabled = false;
             sendButton.disabled = false;
@@ -379,12 +585,12 @@
 
             // Check if API key is present for a strong warning
             if (!apiKey) {
-                displayStatus("🚨 WARNING: API Key is missing. The app is running, but API calls will fail when the Send button is clicked. Insert your key to enable generation.", 'error');
+                displayStatus("🚨 WARNING: API Key is missing. API calls will fail when the Send button is clicked.", 'error');
             } else {
-                displayStatus("ELIZA 2025 is Online! Type your first query.", 'success');
+                displayStatus("Olivet Bot is Online! Waiting for your query.", 'success');
             }
         };
 
     </script>
-</body>  
+</body>
 </html>
