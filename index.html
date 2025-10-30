@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ELIZA 2025 - Conversational Interface</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8; /* Light blue background */
+        }
+        .robot-body {
+            width: 120px;
+            height: 120px;
+            background-color: #ffffff;
+            border: 4px solid #1f2937; /* Dark gray border */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            transition: transform 0.3s ease;
+        }
+        .robot-body:hover {
+            transform: scale(1.05);
+        }
+        /* Custom speech bubble tail pointing to the robot */
+        .speech-bubble {
+            position: relative;
+            background: #ffffff;
+            border-radius: 1rem;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .speech-bubble:after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: -20px;
+            width: 0;
+            height: 0;
+            border: 10px solid transparent;
+            border-right-color: #ffffff;
+            border-left: 0;
+            margin-top: -10px;
+        }
+        #chat-input-container {
+            position: relative;
+        }
+        #user-prompt {
+            width: 100%;
+            padding-right: 4rem; /* Make space for the button */
+        }
+        #send-button {
+            position: absolute;
+            right: 0.5rem;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        .spin-robot {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    <!-- Firebase Imports for Sandbox Environment -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        window.firebaseInit = async () => {
+            try {
+                // IMPORTANT: The variables __app_id, __firebase_config, and __initial_auth_token
+                // are provided by the canvas environment for secure operation.
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+                const app = initializeApp(firebaseConfig);
+                const db = getFirestore(app);
+                const auth = getAuth(app);
+                setLogLevel('Debug');
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                window.db = db;
+                window.auth = auth;
+                window.userId = auth.currentUser?.uid || crypto.randomUUID();
+                
+                document.getElementById('robot-id').textContent = `User ID: ${window.userId}`;
+
+            } catch (error) {
+                console.error("Firebase Initialization Failed:", error);
+            }
+        };
+    </script>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <div class="w-full max-w-2xl flex flex-col items-center space-y-8">
+        
+        <!-- ELIZA 2025 Display Area -->
+        <div class="flex items-start w-full space-x-4">
+            
+            <!-- Robot Character Area -->
+            <div class="flex-shrink-0 flex flex-col items-center space-y-2">
+                <div id="robot-container" class="robot-body rounded-full overflow-hidden flex items-center justify-center text-4xl text-blue-500 font-bold">
+                    <div id="robot-initials">E2</div>
+                </div>
+                <div id="robot-name" class="text-xl font-bold text-gray-700">ELIZA 2025</div>
+                <small id="robot-id" class="text-xs text-gray-500"></small>
+            </div>
+
+            <!-- Speech Bubble (Dynamic Content) -->
+            <div class="flex-grow">
+                <div id="speech-bubble-display" class="speech-bubble h-40 flex flex-col justify-between">
+                    <div id="eliza-text" class="text-gray-700 leading-relaxed overflow-y-auto max-h-24">
+                        <span id="initial-greeting">Loading ELIZA 2025...</span>
+                    </div>
+                    
+                    <!-- Input Area -->
+                    <div id="chat-input-container" class="mt-4 pt-4 border-t border-gray-200">
+                        <form id="chat-form" onsubmit="sendMessage(event)">
+                            <input 
+                                type="text" 
+                                id="user-prompt" 
+                                class="border border-gray-300 p-2 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-sm" 
+                                placeholder="Type your query here..."
+                                autocomplete="off"
+                                disabled
+                            >
+                            <button 
+                                type="submit" 
+                                id="send-button"
+                                class="bg-blue-600 text-white p-2 rounded-full hover:bg-blue-700 transition-colors shadow-lg disabled:opacity-50"
+                                disabled
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Hidden Loading Indicator -->
+                    <div id="loading-spinner" class="absolute inset-0 bg-white bg-opacity-80 rounded-xl hidden items-center justify-center">
+                        <div class="flex flex-col items-center space-y-2">
+                            <svg class="spin-robot h-8 w-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span class="text-blue-600 text-sm font-semibold">ELIZA is calculating...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Error/Status Message Box -->
+        <div id="status-message" class="w-full text-center text-red-600 font-medium hidden"></div>
+
+    </div>
+
+    <script type="module">
+        // Global Variables
+        // WARNING: If hosting publicly (like GitHub Pages), replace the empty string below with your actual API key.
+        // Putting the key in public frontend code is insecure.
+        const apiKey = "";
+        const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
+        const IMAGEN_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict";
+
+        const GREETINGS = [
+            "How can I help you today? I'm ready to compute!",
+            "What's on your mind, human? Let's process some ideas!",
+            "Greetings! I am ELIZA 2025. What interesting query do you have for me?",
+            "Ready for a chat? Tell me what you need, and I'll fetch the data.",
+            "Bleep Bloop! I'm listening. Ask me anything, and I'll be happy to assist!"
+        ];
+
+        const elizaTextElement = document.getElementById('eliza-text');
+        const userPromptInput = document.getElementById('user-prompt');
+        const sendButton = document.getElementById('send-button');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const statusMessageElement = document.getElementById('status-message');
+        let currentSystemInstruction = "You are ELIZA 2025, a friendly, slightly vintage-sounding chatbot. Your responses should be concise, helpful, and maintain a cheerful, conversational tone, always asking a follow-up question to encourage interaction.";
+
+        /**
+         * Utility function to display a temporary status message.
+         * @param {string} message The message to display.
+         * @param {string} type 'success' or 'error'
+         */
+        function displayStatus(message, type = 'error') {
+            statusMessageElement.textContent = message;
+            statusMessageElement.className = `w-full text-center font-medium p-3 rounded-lg ${type === 'error' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`;
+            statusMessageElement.classList.remove('hidden');
+            setTimeout(() => {
+                statusMessageElement.classList.add('hidden');
+            }, 5000);
+        }
+
+        /**
+         * Fetches data from a given API URL with exponential backoff.
+         * @param {string} url The API endpoint URL.
+         * @param {object} options Fetch options (method, headers, body).
+         * @param {number} retries The current number of retries (default 0).
+         * @returns {Promise<object>} The JSON response from the API.
+         */
+        async function fetchWithBackoff(url, options, retries = 0) {
+            try {
+                const response = await fetch(url, options);
+                if (response.status === 429 && retries < 5) { // Too Many Requests
+                    const delay = Math.pow(2, retries) * 1000 + Math.random() * 1000;
+                    console.warn(`Rate limit hit. Retrying in ${Math.round(delay / 1000)}s...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    return fetchWithBackoff(url, options, retries + 1);
+                }
+                if (!response.ok) {
+                    const errorBody = await response.text();
+                    throw new Error(`API request failed: ${response.status} ${response.statusText}. Response: ${errorBody.substring(0, 100)}...`);
+                }
+                return response.json();
+            } catch (error) {
+                console.error("Fetch error:", error);
+                throw error;
+            }
+        }
+
+        /**
+         * Generates the ELIZA 2025 robot image using Imagen 3.0.
+         */
+        async function animateRobotImage() {
+            const robotContainer = document.getElementById('robot-container');
+            const initialsElement = document.getElementById('robot-initials');
+
+            if (!apiKey) {
+                console.warn("API Key is empty. Skipping image generation.");
+                initialsElement.textContent = 'E2';
+                return;
+            }
+
+            try {
+                // Show loading state
+                initialsElement.textContent = '';
+                robotContainer.classList.add('spin-robot');
+                
+                const imagePrompt = "A futuristic, friendly cartoon robot named ELIZA 2025, with large friendly eyes, and a smooth white and blue chassis, designed in a playful, stylized vector art style. Circular body, vector art.";
+                
+                const payload = {
+                    instances: [{ prompt: imagePrompt }],
+                    parameters: { "sampleCount": 1 }
+                };
+
+                const options = {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                };
+
+                const result = await fetchWithBackoff(IMAGEN_API_URL, options);
+
+                const base64Data = result?.predictions?.[0]?.bytesBase64Encoded;
+
+                if (base64Data) {
+                    const imageUrl = `data:image/png;base64,${base64Data}`;
+                    robotContainer.innerHTML = `<img src="${imageUrl}" alt="ELIZA 2025" class="w-full h-full object-cover">`;
+                } else {
+                    throw new Error("Imagen generation failed to return image data.");
+                }
+
+            } catch (error) {
+                console.error("Image generation error:", error);
+                displayStatus("Could not generate the unique ELIZA 2025 image. Defaulting to E2 initials.");
+                robotContainer.innerHTML = '';
+                initialsElement.textContent = 'E2';
+            } finally {
+                robotContainer.classList.remove('spin-robot');
+            }
+        }
+
+        /**
+         * Gets a random greeting from the array.
+         */
+        function getRandomGreeting() {
+            const index = Math.floor(Math.random() * GREETINGS.length);
+            return GREETINGS[index];
+        }
+
+        /**
+         * Main function to handle sending the user's message.
+         */
+        window.sendMessage = async function (event) {
+            event.preventDefault();
+            
+            if (!apiKey) {
+                displayStatus("API Key is missing. Please insert your key in the JavaScript code to enable generation.");
+                return;
+            }
+
+            const userQuery = userPromptInput.value.trim();
+            if (!userQuery) {
+                elizaTextElement.innerHTML = `<span class="text-gray-400 italic">Please enter a question or command.</span>`;
+                return;
+            }
+
+            // 1. Update the speech bubble with the user's message (as if the robot read it)
+            const oldGreeting = elizaTextElement.textContent.trim();
+            elizaTextElement.innerHTML = `**Human:** ${userQuery}`;
+            userPromptInput.value = ''; // Clear input field
+
+            // 2. Disable input and show loading
+            userPromptInput.disabled = true;
+            sendButton.disabled = true;
+            loadingSpinner.classList.remove('hidden');
+
+            try {
+                const payload = {
+                    contents: [{ parts: [{ text: userQuery }] }],
+                    systemInstruction: {
+                        parts: [{ text: currentSystemInstruction + `\n\nUser's previous prompt was: "${oldGreeting}". Your reply must directly address the current query.` }]
+                    },
+                    // Using grounding tools to ensure Eliza has current information
+                    tools: [{ "google_search": {} }],
+                };
+
+                const options = {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                };
+
+                const result = await fetchWithBackoff(GEMINI_API_URL, options);
+                const candidate = result.candidates?.[0];
+                let responseText = "I seem to have run into a small processing error. Can you try again?";
+                
+                if (candidate && candidate.content?.parts?.[0]?.text) {
+                    responseText = candidate.content.parts[0].text;
+                } else {
+                    console.error("API response was missing text content.", result);
+                }
+
+                // 3. Update speech bubble with the robot's reply
+                elizaTextElement.textContent = responseText;
+                
+            } catch (error) {
+                console.error("Gemini API Error:", error);
+                elizaTextElement.textContent = `Oh dear! A computation error occurred: ${error.message}. Perhaps try a different question?`;
+                displayStatus(`API Error: ${error.message}`, 'error');
+
+            } finally {
+                // 4. Re-enable input and hide loading
+                loadingSpinner.classList.add('hidden');
+                userPromptInput.disabled = false;
+                sendButton.disabled = false;
+                userPromptInput.focus();
+            }
+        }
+
+        /**
+         * Initialization function
+         */
+        window.onload = async function() {
+            // 1. Initialize Firebase (for secure environment setup)
+            await window.firebaseInit();
+            
+            // 2. Load the image for ELIZA 2025
+            await animateRobotImage();
+
+            // 3. Set initial greeting and enable interaction
+            const initialGreeting = getRandomGreeting();
+            elizaTextElement.textContent = initialGreeting;
+            
+            userPromptInput.disabled = false;
+            sendButton.disabled = false;
+            userPromptInput.focus();
+
+            // Check if API key is present for a strong warning
+            if (!apiKey) {
+                displayStatus("🚨 WARNING: API Key is missing. The app is running, but API calls will fail when the Send button is clicked. Insert your key to enable generation.", 'error');
+            } else {
+                displayStatus("ELIZA 2025 is Online! Type your first query.", 'success');
+            }
+        };
+
+    </script>
+</body>  
+</html>
