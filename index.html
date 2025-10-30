@@ -78,14 +78,14 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, setDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         window.firebaseInit = async () => {
             try {
                 // IMPORTANT: The variables __app_id, __firebase_config, and __initial_auth_token
                 // are provided by the canvas environment for secure operation.
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
                 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
                 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
@@ -105,6 +105,9 @@
                 window.userId = auth.currentUser?.uid || crypto.randomUUID();
                 
                 document.getElementById('robot-id').textContent = `User ID: ${window.userId}`;
+
+                // Once authenticated and services are set up, load the chat history
+                window.loadChatHistory();
 
             } catch (error) {
                 console.error("Firebase Initialization Failed:", error);
@@ -135,7 +138,7 @@
                     
                     <!-- CONVERSATION HISTORY CONTAINER -->
                     <div id="chat-history-container" class="space-y-3 overflow-y-auto pr-2 flex flex-col" style="max-height: 15rem;">
-                        <div id="initial-loading-status" class="text-gray-500 italic text-center">Loading Olivet Bot...</div>
+                        <div id="initial-loading-status" class="text-gray-500 italic text-center">Connecting to Chat History...</div>
                     </div>
                     
                     <!-- Input Area -->
@@ -195,14 +198,12 @@
     <script type="module">
         // Global Variables
         // WARNING: If hosting publicly (like GitHub Pages), replace the empty string below with your actual API key.
-        const apiKey = "AIzaSyBaUh7CiEA_Ugwz6_Xa4D4dV8sYyIb2TMs"; // User's key (used for demonstration purposes)
+        const apiKey = "AIzaSyBaUh7CiEA_Ugwz6_Xa4D4dV8sYyIb2TMs"; // User's key
         const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
         const TTS_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent"; 
 
         // ----------------------------------------------------------------------
         // 🚨 IMPORTANT: PASTE YOUR LOGO BASE64 DATA HERE
-        // Replace 'null' with a string starting with 'iVBORw...' 
-        // Example: const olivetLogoBase64 = "iVBORw0KGgoAAAANSUhEUgAAA[...]";
         // ----------------------------------------------------------------------
         const olivetLogoBase64 = null; 
 
@@ -213,7 +214,15 @@
             "Ready for a chat? Tell me what you need, and I'll fetch the data.",
         ];
 
-        let chatHistory = []; 
+        // Firestore Globals
+        let db;
+        let auth;
+        let userId;
+        let appId;
+        let chatHistory = []; // This will be updated by the Firestore listener
+        
+        const CHAT_COLLECTION_PATH = () => `/artifacts/${appId}/users/${userId}/chat_history`;
+
         let currentSystemInstruction = "You are Olivet Bot, a friendly, professional, and slightly enthusiastic chatbot designed to be a supportive digital assistant. Your responses should be concise, helpful, and maintain a cheerful, conversational tone, always asking a brief follow-up question to encourage interaction.";
 
         const userPromptInput = document.getElementById('user-prompt');
@@ -271,8 +280,76 @@
             historyContainer.scrollTop = historyContainer.scrollHeight;
 
             // Enable the speak button if the last message was from the model
-            speakButton.disabled = chatHistory.length === 0 || chatHistory[chatHistory.length - 1].role !== 'model';
+            speakButton.disabled = chatHistory.length === 0 || chatHistory[chatHistory.length - 1].role !== 'model' || isSpeaking;
         }
+
+        /**
+         * Saves a message object (user or model) to Firestore.
+         */
+        async function saveMessageToFirestore(role, text) {
+            try {
+                if (!db || !userId || !appId) {
+                    throw new Error("Firestore is not initialized.");
+                }
+                const chatRef = collection(db, CHAT_COLLECTION_PATH());
+                await addDoc(chatRef, {
+                    role,
+                    text,
+                    timestamp: serverTimestamp() // Use server timestamp for ordering
+                });
+            } catch (error) {
+                console.error("Error saving message to Firestore:", error);
+                displayStatus(`History save failed: ${error.message}`, 'error');
+            }
+        }
+        
+        /**
+         * Loads chat history from Firestore using a real-time listener.
+         */
+        window.loadChatHistory = function() {
+            if (!db || !userId || !appId) {
+                console.error("Database or User ID not ready.");
+                return;
+            }
+
+            const chatRef = collection(db, CHAT_COLLECTION_PATH());
+            const q = query(chatRef, orderBy('timestamp', 'asc'));
+
+            // Set up real-time listener
+            onSnapshot(q, async (snapshot) => {
+                let initialLoad = chatHistory.length === 0 && !snapshot.empty;
+                
+                chatHistory = snapshot.docs.map(doc => {
+                    const data = doc.data();
+                    // Reformat the Firestore data back into the Gemini chat history structure
+                    return {
+                        role: data.role,
+                        parts: [{ text: data.text }]
+                    };
+                });
+
+                if (chatHistory.length === 0) {
+                    // If the collection is empty, automatically add the first greeting
+                    const initialGreeting = getRandomGreeting();
+                    await saveMessageToFirestore('model', initialGreeting);
+                    displayStatus("New conversation started. History saved to cloud.", 'success');
+                    
+                } else {
+                    renderHistory();
+                    if (initialLoad) {
+                        // Only enable controls after the first successful load
+                        userPromptInput.disabled = false;
+                        sendButton.disabled = false;
+                        userPromptInput.focus();
+                        displayStatus("History loaded successfully!", 'success');
+                    }
+                }
+            }, (error) => {
+                console.error("Firestore real-time listener failed:", error);
+                document.getElementById('initial-loading-status').textContent = `Failed to load history: ${error.message}`;
+            });
+        };
+
 
         /**
          * Converts Base64 audio data to an ArrayBuffer.
@@ -306,13 +383,6 @@
 
             const buffer = new ArrayBuffer(44 + pcmData.byteLength);
             const view = new DataView(buffer);
-
-            // Helper to write a string (4 characters)
-            function writeString(view, offset, str) {
-                for (let i = 0; i < str.length; i++) {
-                    view.setUint8(offset + i, str.charCodeAt(i));
-                }
-            }
 
             // RIFF chunk descriptor
             view.setUint32(0, chunkId, false); // 'RIFF'
@@ -484,20 +554,19 @@
                 return;
             }
 
-            // 1. Add user message to history and render
-            chatHistory.push({ role: "user", parts: [{ text: userQuery }] });
-            renderHistory();
+            // 1. Save user message to Firestore. The real-time listener will handle rendering.
             userPromptInput.value = ''; // Clear input field
+            await saveMessageToFirestore('user', userQuery);
 
             // 2. Disable input and show loading
             userPromptInput.disabled = true;
             sendButton.disabled = true;
-            speakButton.disabled = true; // Disable speak button while generating
+            speakButton.disabled = true;
             loadingSpinner.classList.remove('hidden');
 
             try {
                 const payload = {
-                    // Send the complete history for context
+                    // Send the complete history (from Firestore listener) for context
                     contents: chatHistory, 
                     systemInstruction: {
                         // Reinforce the persona and conversational rules
@@ -523,15 +592,13 @@
                     console.error("API response was missing text content.", result);
                 }
 
-                // 3. Add model's reply to history and render
-                chatHistory.push({ role: "model", parts: [{ text: responseText }] });
-                renderHistory();
+                // 3. Save model's reply to Firestore. The listener will handle rendering and chatHistory update.
+                await saveMessageToFirestore('model', responseText);
                 
             } catch (error) {
                 console.error("Gemini API Error:", error);
-                // On error, the model message is added to the history so the user knows what happened.
-                chatHistory.push({ role: "model", parts: [{ text: `Oh dear! A computation error occurred: ${error.message}. Please check your API key and billing status in the console.` }] });
-                renderHistory();
+                // On error, save the error message as a model reply for persistence
+                await saveMessageToFirestore('model', `Oh dear! A computation error occurred: ${error.message}. Please check your API key and billing status.`);
                 displayStatus(`API Error: ${error.message}`, 'error');
 
             } finally {
@@ -539,7 +606,7 @@
                 loadingSpinner.classList.add('hidden');
                 userPromptInput.disabled = false;
                 sendButton.disabled = false;
-                // renderHistory already updates the speak button status
+                // Speak button status handled by renderHistory after Firestore update
                 userPromptInput.focus();
             }
         }
@@ -556,7 +623,7 @@
          * Initialization function
          */
         window.onload = async function() {
-            // 1. Initialize Firebase (for secure environment setup)
+            // 1. Initialize Firebase (this calls window.loadChatHistory internally)
             await window.firebaseInit();
             
             // 2. Set up the logo if base64 data is provided
@@ -571,23 +638,9 @@
                  logoPlaceholder.textContent = 'OB';
             }
 
-
-            // 3. Set initial greeting and enable interaction
-            const initialGreeting = getRandomGreeting();
-            
-            // Add initial greeting to history and render
-            chatHistory.push({ role: "model", parts: [{ text: initialGreeting }] });
-            renderHistory();
-            
-            userPromptInput.disabled = false;
-            sendButton.disabled = false;
-            userPromptInput.focus();
-
             // Check if API key is present for a strong warning
             if (!apiKey) {
                 displayStatus("🚨 WARNING: API Key is missing. API calls will fail when the Send button is clicked.", 'error');
-            } else {
-                displayStatus("Olivet Bot is Online! Waiting for your query.", 'success');
             }
         };
 
